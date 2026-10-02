@@ -1,0 +1,2315 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>自在碁 (jizaigo)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            touch-action: manipulation;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(150, 150, 150, 0.3);
+            border-radius: 3px;
+        }
+        .hidden { display: none !important; }
+        details > summary { cursor: pointer; list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+    </style>
+
+    <!-- PeerJS (WebRTC P2P通信ライブラリ) -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body id="appBody" class="min-h-screen flex flex-col items-center justify-between p-3 sm:p-6 bg-white text-neutral-900 select-none">
+
+    <!-- メインコンテンツ領域 -->
+    <div class="w-full max-w-xl flex flex-col items-center gap-4 sm:gap-5">
+
+        <!-- ヘッダー: タイトル & 設定歯車ボタン -->
+        <header class="w-full flex items-center justify-between pt-1">
+            <button id="btnOpenRules" title="ルール" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 active:scale-95 transition-all">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2"></path>
+                    <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"></circle>
+                </svg>
+            </button>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-wider text-center">自在碁</h1>
+            <button id="btnOpenSettings" title="設定" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 active:scale-95 transition-all">
+                <svg class="w-6 h-6 current-color" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </button>
+        </header>
+
+        <!-- ステータス & 設定バー -->
+        <div id="statusCard" class="w-full p-3.5 sm:p-4 rounded-xl flex flex-col gap-3 transition-colors text-sm sm:text-base border">
+            <!-- 手番 & モード表示 -->
+            <div class="flex items-center justify-between font-medium">
+                <div class="flex items-center gap-2">
+                    <span class="opacity-70">手番:</span>
+                    <span id="turnIndicator" class="font-bold underline decoration-2 underline-offset-4">黒 (1P)</span>
+                </div>
+                <div id="gameModeBadge" class="text-xs px-2.5 py-1 rounded-full font-semibold border opacity-80">
+                    ローカル対戦
+                </div>
+            </div>
+
+            <!-- アゲハマ (捕獲数) & コミ -->
+            <div class="flex items-center justify-between text-xs sm:text-sm pt-1 border-t border-current/10">
+                <div class="flex gap-4">
+                    <span>黒アゲハマ: <strong id="blackCaptures" class="font-bold">0</strong></span>
+                    <span>白アゲハマ: <strong id="whiteCaptures" class="font-bold">0</strong></span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="opacity-70">コミ:</span>
+                    <span id="komiDisplay" class="font-bold font-mono">6.5</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 盤面 Canvas -->
+        <div class="w-full flex justify-center items-center relative">
+            <canvas id="boardCanvas" class="w-full aspect-square cursor-pointer max-w-[500px] rounded-lg"></canvas>
+
+            <!-- AI思考中オーバーレイ -->
+            <div id="aiThinkingOverlay" class="absolute inset-0 bg-black/20 backdrop-blur-[1px] rounded-lg flex items-center justify-center hidden">
+                <div class="bg-white/90 text-neutral-900 px-4 py-2 rounded-full shadow-lg font-bold text-sm flex items-center gap-2">
+                    <div class="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
+                    AI 思考中...
+                </div>
+            </div>
+        </div>
+
+        <!-- プレビュー情報 (接続数・置けない理由) -->
+        <div id="previewInfo" class="w-full text-center text-xs sm:text-sm font-bold min-h-[1.25rem] -mt-2"></div>
+
+        <!-- 確定ボタン (スマホ用: プレビューマーカーをスワイプで動かして確定) -->
+        <button id="btnConfirm" disabled class="hidden w-full py-3 px-4 text-sm font-bold border rounded-xl active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+            ここに置く (確定)
+        </button>
+
+        <!-- ゲーム操作ボタンエリア -->
+        <div class="w-full flex justify-between items-center gap-3">
+            <button id="btnUndo" disabled class="flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold border rounded-xl hover:opacity-80 active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                1手戻る
+            </button>
+            <button id="btnPass" class="flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold border rounded-xl hover:opacity-80 active:scale-95 transition-all shadow-sm">
+                パス
+            </button>
+            <button id="btnResign" class="flex-1 py-2.5 px-4 text-xs sm:text-sm font-bold border border-red-500/50 text-red-600 rounded-xl hover:bg-red-500/10 active:scale-95 transition-all shadow-sm">
+                投了
+            </button>
+        </div>
+
+        <!-- 死に石選択フェーズ用バナー -->
+        <div id="bannerDeadStones" class="hidden w-full flex flex-col gap-2 p-3 bg-amber-50 text-amber-900 text-xs sm:text-sm rounded-xl border border-amber-200 shadow-sm">
+            <div class="flex items-center justify-between font-bold">
+                <span>⚠️ 死に石選択フェーズ</span>
+                <span class="text-xs opacity-75">死に石をタップして指定</span>
+            </div>
+            <p class="text-xs text-amber-800/90 leading-relaxed">
+                地の中に残った相手の死に石をタップしてマーキングしてください(連ごとに選択されます)。完了したら「確定して集計」を押します。
+            </p>
+            <div class="flex gap-2 pt-1">
+                <button id="btnCancelDeadStones" class="flex-1 py-1.5 px-3 bg-white border border-amber-300 font-bold rounded-lg hover:bg-amber-100 transition-all text-amber-900">
+                    対局再開
+                </button>
+                <button id="btnConfirmDeadStones" class="flex-1 py-1.5 px-3 bg-amber-900 text-white font-bold rounded-lg hover:bg-amber-800 transition-all">
+                    確定して集計
+                </button>
+            </div>
+        </div>
+
+        <!-- 観戦・結果再表示用バナー -->
+        <div id="bannerResult" class="hidden w-full flex items-center justify-between py-2 px-3 bg-neutral-100 text-xs sm:text-sm rounded-lg text-neutral-800 border border-neutral-200">
+            <span class="font-medium">対局終了</span>
+            <button id="btnShowResultModal" class="font-bold underline hover:opacity-70">
+                結果を見る
+            </button>
+        </div>
+
+        <!-- 操作用インフォメーション -->
+        <p class="text-xs opacity-60 text-center leading-relaxed">
+            PC: カーソルを合わせてプレビュー・クリックで打つ / スマホ: 盤面をタップでマーカー表示 → スワイプで移動 → 「ここに置く」で確定
+        </p>
+
+    </div>
+
+    <!-- 【ルール説明モーダル】 -->
+    <div id="rulesModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white text-neutral-900 p-5 sm:p-6 max-w-md w-full rounded-2xl shadow-2xl flex flex-col gap-4 border border-neutral-200 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b pb-3 border-neutral-200">
+                <h2 class="text-xl font-bold tracking-wide">自在碁のルール</h2>
+                <button id="btnCloseRules" class="text-neutral-400 hover:text-neutral-800 text-xl font-bold px-2">✕</button>
+            </div>
+            <ul class="flex flex-col gap-2 text-sm leading-relaxed list-disc pl-5">
+                <li>石は半径Rの丸石。中心を1線の内側(線上を含む)の好きな位置に置けます。既存の石と中心距離2R以上が必要です。</li>
+                <li>石の周りの半径√2Rの円が「接続領域」。他の石の体(中心から半径R)がその円に入る(=中心距離が(1+√2)R≒2.414R未満)と「接続」します。接続数に上限はなく、何個とでも接続できます(格子の上下左右の隣 2R は接続、斜め隣 2√2R≒2.83R は接続しません)。</li>
+                <li>壁は辺ごとに1つと数え、敵石として扱います。表示上の壁は1線から距離R外側ですが、判定上の壁は1線から2R外側にあります。石の接続領域(半径(1+√2)R)が判定上の壁に触れている(=見かけの壁に半径√2Rの円が触れている。1線から(√2-1)R≒0.41R以内)と壁に接続します。</li>
+                <li>同じ色どうしの接続を「連」と呼びます。接続数が飽和数4以上の石を「飽和」した石と呼び、連のすべての石が飽和したとき、その連は死(取られる)です。</li>
+                <li>自殺手(置いた石の連が全員飽和する手)と、直前の局面に戻るコウは禁止です。</li>
+                <li>接続線の表示: 同じ色どうしの接続は石の色の太線、敵石との接続は薄灰色の線、壁との接続は壁への垂線(薄灰色)で表示されます。</li>
+                <li>終局後、死に石を除いた盤面で、各石の接続領域(半径√2Rの円。壁に接続した石は壁までの垂線方向にも延びます)を除いた空き領域のうち、境界が壁と単一の同じ色の連だけでできている領域がその色の地です(複数の連や敵石に接する領域は地になりません)。面積が4R²未満の領域は無視され、表示も計上もされません。地は黒・白どちらも盤面に表示され、面積4R²を1目として数えます。</li>
+                <li>自分の地に接していない連は死に石として扱う取り決めです(死に石の確認時にオレンジ色でハイライトされます。実際に死に石とするのは対局者の確認によります)。設定で、対局中に地の領域を表示することもできます(計上はされません)。</li>
+                <li>アゲハマは1子につき1.5目として数えます(石1つの接続領域の面積 2πR²≒1.57目分、相手の地を潰せるため)。地とアゲハマにコミを加えて勝敗を決めます。</li>
+            </ul>
+            <button id="btnCloseRules2" class="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-bold rounded-xl transition-colors">閉じる</button>
+        </div>
+    </div>
+
+    <!-- 【1手戻る確認モーダル】 -->
+    <div id="undoModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white text-neutral-900 p-6 max-w-sm w-full text-center flex flex-col gap-5 rounded-2xl shadow-2xl border border-neutral-200">
+            <h2 class="text-xl font-extrabold tracking-wide">1手戻りますか？</h2>
+            <p class="text-sm text-neutral-600">直前に打たれた石を取り消し、その手番に戻ります。</p>
+            <div class="flex flex-col gap-2 pt-1">
+                <button id="btnUndoConfirm" class="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-bold rounded-xl transition-colors">
+                    1手戻る
+                </button>
+                <button id="btnUndoCancel" class="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm font-bold rounded-xl transition-colors">
+                    キャンセル
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 【設定モーダル】 -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div id="settingsCard" class="bg-white text-neutral-900 p-5 sm:p-6 max-w-md w-full rounded-2xl shadow-2xl flex flex-col gap-5 border border-neutral-200 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b pb-3 border-neutral-200">
+                <h2 class="text-xl font-bold tracking-wide">ゲーム設定</h2>
+                <button id="btnCloseSettings" class="text-neutral-400 hover:text-neutral-800 text-xl font-bold px-2">✕</button>
+            </div>
+
+            <!-- 1. 盤面サイズ -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-bold uppercase tracking-wider text-neutral-500">盤面サイズ</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button data-size="9" class="btn-size py-2 rounded-lg border border-neutral-300 font-bold text-sm hover:bg-neutral-100 transition-all">9路盤</button>
+                    <button data-size="13" class="btn-size py-2 rounded-lg border border-neutral-300 font-bold text-sm hover:bg-neutral-100 transition-all">13路盤</button>
+                    <button data-size="19" class="btn-size py-2 rounded-lg border border-neutral-300 font-bold text-sm hover:bg-neutral-100 transition-all">19路盤</button>
+                </div>
+            </div>
+
+            <!-- 2. 対戦モード -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-bold uppercase tracking-wider text-neutral-500">対戦モード</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button data-mode="local" class="btn-mode py-2 rounded-lg border border-neutral-300 font-bold text-xs sm:text-sm hover:bg-neutral-100 transition-all">ローカル</button>
+                    <button data-mode="ai" class="btn-mode py-2 rounded-lg border border-neutral-300 font-bold text-xs sm:text-sm hover:bg-neutral-100 transition-all">AI対戦</button>
+                    <button data-mode="online" class="btn-mode py-2 rounded-lg border border-neutral-300 font-bold text-xs sm:text-sm hover:bg-neutral-100 transition-all">オンライン</button>
+                </div>
+            </div>
+
+            <!-- AI詳細設定 (モード=ai時のみ表示) -->
+            <div id="aiOptions" class="p-3 bg-neutral-50 rounded-xl border border-neutral-200 flex flex-col gap-2 hidden">
+                <span class="text-xs font-bold text-neutral-600">プレイヤーの手番:</span>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btnAiPlayerBlack" class="py-1.5 rounded border text-xs font-bold bg-neutral-900 text-white">黒 (先手)</button>
+                    <button id="btnAiPlayerWhite" class="py-1.5 rounded border text-xs font-bold bg-white text-neutral-800 border-neutral-300">白 (後手)</button>
+                </div>
+            </div>
+
+            <!-- オンライン詳細設定 (モード=online時のみ表示) -->
+            <div id="onlineOptions" class="p-3 bg-neutral-50 rounded-xl border border-neutral-200 flex flex-col gap-3 hidden text-xs">
+                <div class="flex flex-col gap-1">
+                    <span class="font-bold text-neutral-700">部屋を作る (ホスト):</span>
+                    <button id="btnCreateRoom" class="py-2 bg-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 transition-all">
+                        ルーム作成
+                    </button>
+                </div>
+                <div class="border-t border-neutral-200 pt-2 flex flex-col gap-1.5">
+                    <span class="font-bold text-neutral-700">部屋に入る (ゲスト):</span>
+                    <div class="flex gap-2">
+                        <input type="text" id="inputRoomId" placeholder="5桁のルームID" maxlength="5"
+                            class="flex-1 px-3 py-1.5 border border-neutral-300 rounded-lg text-center font-mono text-sm uppercase focus:outline-none focus:border-neutral-900">
+                        <button id="btnJoinRoom" class="px-4 py-1.5 bg-neutral-800 text-white font-bold rounded-lg hover:bg-neutral-700 transition-all">
+                            参加
+                        </button>
+                    </div>
+                </div>
+                <div id="onlineRoomStatus" class="text-center font-bold text-neutral-600 pt-1"></div>
+            </div>
+
+            <!-- 3. サウンド設定 -->
+            <div class="flex items-center justify-between pt-1">
+                <span class="text-sm font-bold text-neutral-700">効果音 (SE)</span>
+                <button id="btnToggleSound" class="px-3 py-1 text-xs font-bold rounded-full border border-neutral-300 bg-neutral-100">
+                    ON
+                </button>
+            </div>
+
+            <!-- 4. 表示補助 -->
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-bold text-neutral-700">接続線の表示</span>
+                <button id="btnToggleLinks" class="px-3 py-1 text-xs font-bold rounded-full border border-neutral-300 bg-neutral-100">
+                    ON
+                </button>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-bold text-neutral-700">地の領域の表示 (対局中)</span>
+                <button id="btnToggleTerritory" class="px-3 py-1 text-xs font-bold rounded-full border border-neutral-300 bg-neutral-100">
+                    OFF
+                </button>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-sm font-bold text-neutral-700">格子点への吸着</span>
+                <button id="btnToggleSnap" class="px-3 py-1 text-xs font-bold rounded-full border border-neutral-300 bg-neutral-100">
+                    ON
+                </button>
+            </div>
+
+            <!-- 5. カラーテーマ選択 -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-bold uppercase tracking-wider text-neutral-500">カラーテーマ</label>
+                <div class="grid grid-cols-1 gap-1.5" id="themeList">
+                    <!-- JSで動的にテーマボタンを生成 -->
+                </div>
+            </div>
+
+            <!-- ニューゲームスタート -->
+            <button id="btnStartNewGame" class="w-full py-3 bg-neutral-900 text-white font-bold text-sm tracking-wider rounded-xl hover:bg-neutral-800 active:scale-98 transition-all mt-2">
+                ニューゲームスタート
+            </button>
+        </div>
+    </div>
+
+    <!-- 【対局結果モーダル】 -->
+    <div id="resultModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white text-neutral-900 p-6 sm:p-8 max-w-sm w-full text-center flex flex-col gap-5 rounded-2xl shadow-2xl border border-neutral-200">
+            <h2 id="resultTitle" class="text-2xl font-extrabold tracking-wide">対局終了</h2>
+
+            <div id="resultDetails" class="text-sm text-neutral-700 flex flex-col gap-2 py-3 border-y border-neutral-200 font-medium">
+                <!-- 結果の詳細情報がJSで挿入されます -->
+            </div>
+
+            <div class="flex flex-col gap-2 pt-1">
+                <button id="btnViewBoard" class="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm font-bold rounded-xl transition-colors">
+                    盤面を確認する
+                </button>
+                <button id="btnModalRestart" class="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-bold rounded-xl transition-colors">
+                    もう一度遊ぶ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. カラーテーマ定義
+        // ==========================================
+        const THEMES = {
+            default: {
+                id: 'default',
+                name: '白 / 黒 (標準)',
+                bg: 'bg-white',
+                text: 'text-neutral-900',
+                subText: 'text-neutral-500',
+                boardBg: '#ffffff',
+                lineColor: '#171717',
+                starColor: '#171717',
+                p1Fill: '#171717', p1Stroke: '#000000',
+                p2Fill: '#ffffff', p2Stroke: '#171717',
+                cardBg: 'bg-neutral-50',
+                border: 'border-neutral-200',
+                btnBg: 'bg-neutral-900 text-white hover:bg-neutral-800'
+            },
+            dark: {
+                id: 'dark',
+                name: '黒 / 白 (ダーク)',
+                bg: 'bg-neutral-950',
+                text: 'text-neutral-100',
+                subText: 'text-neutral-400',
+                boardBg: '#0f0f0f',
+                lineColor: '#525252',
+                starColor: '#a3a3a3',
+                p1Fill: '#262626', p1Stroke: '#e5e5e5',
+                p2Fill: '#f5f5f5', p2Stroke: '#171717',
+                cardBg: 'bg-neutral-900',
+                border: 'border-neutral-800',
+                btnBg: 'bg-neutral-100 text-neutral-900 hover:bg-white'
+            },
+            go: {
+                id: 'go',
+                name: 'ベージュ / 濃い茶色 (伝統碁盤)',
+                bg: 'bg-[#f4e4bc]',
+                text: 'text-[#3e2211]',
+                subText: 'text-[#785338]',
+                boardBg: '#e8c88b',
+                lineColor: '#3e2211',
+                starColor: '#3e2211',
+                p1Fill: '#1c1917', p1Stroke: '#000000',
+                p2Fill: '#fef3c7', p2Stroke: '#78350f',
+                cardBg: 'bg-[#ebd19d]',
+                border: 'border-[#cbb07a]',
+                btnBg: 'bg-[#3e2211] text-[#f4e4bc] hover:bg-[#27150a]'
+            },
+            cyber: {
+                id: 'cyber',
+                name: '紺 / 水色 (ネイビー)',
+                bg: 'bg-slate-950',
+                text: 'text-sky-100',
+                subText: 'text-sky-400',
+                boardBg: '#0f172a',
+                lineColor: '#0284c7',
+                starColor: '#38bdf8',
+                p1Fill: '#1e293b', p1Stroke: '#38bdf8',
+                p2Fill: '#38bdf8', p2Stroke: '#0284c7',
+                cardBg: 'bg-slate-900',
+                border: 'border-slate-800',
+                btnBg: 'bg-sky-500 text-slate-950 hover:bg-sky-400'
+            },
+            fancy: {
+                id: 'fancy',
+                name: 'ピンク / 濃い赤紫 (ファンシー)',
+                bg: 'bg-fuchsia-50',
+                text: 'text-fuchsia-950',
+                subText: 'text-fuchsia-600',
+                boardBg: '#fbcfe8',
+                lineColor: '#831843',
+                starColor: '#831843',
+                p1Fill: '#831843', p1Stroke: '#500724',
+                p2Fill: '#fff1f2', p2Stroke: '#9f1239',
+                cardBg: 'bg-fuchsia-100',
+                border: 'border-fuchsia-200',
+                btnBg: 'bg-fuchsia-900 text-fuchsia-50 hover:bg-fuchsia-800'
+            }
+        };
+
+        // ==========================================
+        // 2. Web Audio API サウンドシステム
+        // ==========================================
+        class SoundManager {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+            playPlace() {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(110, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+            playCapture() {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                [523.25, 659.25, 783.99].forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.2, now + idx * 0.05);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.05 + 0.12);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.05);
+                    osc.stop(now + idx * 0.05 + 0.12);
+                });
+            }
+            playClick() {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 600;
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.04);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.04);
+            }
+            playWin() {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.25, now + idx * 0.1);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.1 + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + idx * 0.1 + 0.3);
+                });
+            }
+        }
+
+        const soundManager = new SoundManager();
+
+        // ==========================================
+        // 3. ゲーム状態変数
+        // ==========================================
+        // 座標系: 石の半径 R = 1 とした「R単位」。格子間隔は 2、盤の一辺(1線〜1線)は L = 2*(路数-1)。
+        let BOARD_SIZE = 9;
+        let pendingBoardSize = BOARD_SIZE; // 盤サイズの選択値 (ニューゲーム開始時に適用)
+        let stones = [];          // [{ id, x, y, p }]  p: 1=黒, 2=白
+        let analysis = null;      // stones の接続解析キャッシュ
+        let prevStones = null;    // コウ判定用: 直前の着手が行われる前の局面
+        let nextStoneId = 1;
+        let turn = 1; // 1:黒, 2:白
+        let captures = { 1: 0, 2: 0 };
+        let komi = 6.5;
+        let consecutivePasses = 0;
+        let gameOver = false;
+        let gameResultData = null;
+        let gamePhase = 'playing'; // 'playing' | 'dead_stone_selection' | 'ended'
+        let deadStones = new Set(); // 死に石としてマークされた石id の集合
+        let territoryView = null;   // 終局後の地の表示用データ
+
+        // モード & 設定
+        let gameMode = 'local'; // 'local' | 'ai' | 'online'
+        let aiPlayer = 2; // AIの手番 (2: 白=後手, 1: 黒=先手)
+        let currentTheme = THEMES.default;
+        let showLinks = true;     // 接続線の表示
+        let showTerritory = false; // 対局中に地の領域を表示 (計上はしない)
+        let snapToGrid = false;   // 格子点への吸着 (デフォルトOFF)
+        let previewRaw = null;    // プレビューマーカー位置 { x, y } (R単位, 未補正)
+        let lastMove = null;      // 直前に置いた石 { player, x, y, id }
+        let lastPointerType = 'mouse'; // 'mouse' | 'touch' | 'pen'
+        let isTouchUI = false;    // タッチ操作UI(確定ボタンを表示)
+        let history = [];         // 1手戻る用: 各着手前のスナップショットのスタック
+
+        // オンライン対戦 (PeerJS / WebRTC) 関連
+        const ROOM_ID_PREFIX = 'jizaigo-';
+        let peer = null;         // PeerJS Peerインスタンス
+        let conn = null;         // PeerJS DataConnection (相手との接続)
+        let onlineRoomId = null; // 表示用の5桁ルームコード
+        let myOnlineRole = null; // 1 (Host=Black) | 2 (Guest=White)
+        let isOnlineHost = false;
+
+        // ==========================================
+        // 4. 自在碁 (jizaigo) ルール判定コア
+        // ==========================================
+        // <CORE>
+        const LINK_R = 1 + Math.SQRT2;   // 接続領域の半径 (1+√2)R ≒ 2.414R
+        const LINK_D2 = LINK_R * LINK_R; // 接続領域の半径^2
+        const MIN_D2 = 4;      // 石の最小中心距離 (2R)^2
+        const MAX_LINK = 4;    // 飽和数 (接続数がこれ以上の石は「飽和」。連の全石が飽和すると死)。接続数そのものの上限はない
+const CAPTURE_VALUE = 1.5; // アゲハマ1子あたりの目数 (石1つの接続領域 2πR² ≒ 1.57目分、相手の地を潰せるため)
+const CIRCLE_R = Math.SQRT2; // 接続領域を示す円の半径 √2R (他の石の体=半径Rがこの円に入ると接続 ⇔ 中心距離 < LINK_R)
+        const EPS = 1e-9;
+        const KO_TOL = 0.5;    // コウ判定で「同じ位置」とみなす許容誤差 (R単位)
+
+        function boardL() { return 2 * (BOARD_SIZE - 1); }
+
+        // 壁との接続: 表示上の壁の境界は 1線の外側 R のまま。ただし判定上の壁は 1線の外側 2R にある。
+        // 石の接続領域 (半径 (1+√2)R) が判定上の壁 (1線から 2R 外側) に触れていれば壁に接続する。
+        //  ⇔ 接続領域 (半径 √2R の円) が見かけの壁 (1線から R 外側) に触れている
+        //  ⇔ 1線からの距離が (1+√2)R - 2R = (√2-1)R ≒ 0.414R 以内
+        const WALL_DIST = 2;
+        const WALL_REACH = LINK_R - WALL_DIST;
+        function wallSidesAt(x, y) {
+            const L = boardL();
+            const sides = [];
+            if (x <= WALL_REACH + EPS) sides.push('L');
+            if (x >= L - WALL_REACH - EPS) sides.push('R');
+            if (y <= WALL_REACH + EPS) sides.push('T');
+            if (y >= L - WALL_REACH - EPS) sides.push('B');
+            return sides;
+        }
+        function wallCountAt(x, y) { return wallSidesAt(x, y).length; }
+        // 石の中心から壁(の境界)へ下ろした垂線の足
+        function wallFoot(side, x, y) {
+            const L = boardL();
+            if (side === 'L') return { x: -1, y };
+            if (side === 'R') return { x: L + 1, y };
+            if (side === 'T') return { x, y: -1 };
+            return { x, y: L + 1 };
+        }
+
+        // 盤上の石の接続解析 (各石の接続相手・接続数・連・連の空き接続枠)
+        function analyzeStones(st) {
+            const n = st.length;
+            const nbrs = Array.from({ length: n }, () => []);
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const dx = st[i].x - st[j].x, dy = st[i].y - st[j].y;
+                    if (dx * dx + dy * dy < LINK_D2 - EPS) {
+                        nbrs[i].push(j);
+                        nbrs[j].push(i);
+                    }
+                }
+            }
+            const cnt = st.map((s, i) => nbrs[i].length + wallCountAt(s.x, s.y));
+            const chainId = new Array(n).fill(-1);
+            const chains = [];
+            for (let i = 0; i < n; i++) {
+                if (chainId[i] >= 0) continue;
+                const cid = chains.length;
+                const members = [i];
+                chainId[i] = cid;
+                for (let h = 0; h < members.length; h++) {
+                    const cur = members[h];
+                    for (const k of nbrs[cur]) {
+                        if (chainId[k] < 0 && st[k].p === st[i].p) {
+                            chainId[k] = cid;
+                            members.push(k);
+                        }
+                    }
+                }
+                chains.push(members);
+            }
+            const chainLibs = chains.map(ch => ch.reduce((a, i) => a + Math.max(0, MAX_LINK - cnt[i]), 0));
+            return { n, nbrs, cnt, chainId, chains, chainLibs };
+        }
+
+        function refreshAnalysis() {
+            analysis = analyzeStones(stones);
+        }
+
+        // 2つの局面が (許容誤差内で) 同一か
+        function samePosition(a, b) {
+            if (a.length !== b.length) return false;
+            const used = new Array(b.length).fill(false);
+            for (const s of a) {
+                let found = -1;
+                for (let j = 0; j < b.length; j++) {
+                    if (used[j] || b[j].p !== s.p) continue;
+                    if (Math.hypot(b[j].x - s.x, b[j].y - s.y) <= KO_TOL) { found = j; break; }
+                }
+                if (found < 0) return false;
+                used[found] = true;
+            }
+            return true;
+        }
+
+        // (x, y) に player の石を置く手の判定。盤面は変更しない。
+        // 戻り値: { ok, reason, captured:[stones上のindex], linkCount, libs, nb, walls }
+        function evaluateMove(x, y, player) {
+            const L = boardL();
+            if (!(x >= -EPS && x <= L + EPS && y >= -EPS && y <= L + EPS)) {
+                return { ok: false, reason: 'outside' };
+            }
+            const st = stones, an = analysis;
+            const nb = []; // 接続領域に入る既存の石
+            for (let i = 0; i < st.length; i++) {
+                const dx = st[i].x - x, dy = st[i].y - y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < MIN_D2 - EPS) return { ok: false, reason: 'overlap' };
+                if (d2 < LINK_D2 - EPS) nb.push(i);
+            }
+            const walls = wallCountAt(x, y);
+            const linkCount = nb.length + walls;
+            const opp = player === 1 ? 2 : 1;
+            const nbSet = new Set(nb);
+
+            // 取り判定: 新しい石の接続領域に入った相手の連だけが対象
+            const capturedIdx = [];
+            const seenChains = new Set();
+            for (const i of nb) {
+                if (st[i].p !== opp) continue;
+                const cid = an.chainId[i];
+                if (seenChains.has(cid)) continue;
+                seenChains.add(cid);
+                const ch = an.chains[cid];
+                let dead = true;
+                for (const k of ch) {
+                    if (an.cnt[k] + (nbSet.has(k) ? 1 : 0) < MAX_LINK) { dead = false; break; }
+                }
+                if (dead) capturedIdx.push(...ch);
+            }
+            const capSet = new Set(capturedIdx);
+
+            // 取られた石が消えることで減る接続数
+            const dec = new Map();
+            for (const t of capturedIdx) {
+                for (const s of an.nbrs[t]) {
+                    if (!capSet.has(s)) dec.set(s, (dec.get(s) || 0) + 1);
+                }
+            }
+            const cntAfter = (k) => an.cnt[k] + (nbSet.has(k) ? 1 : 0) - (dec.get(k) || 0);
+
+            // 新しい石の接続数 (取りを解決した後)。接続数に上限はなく、飽和数 MAX_LINK は死の判定にのみ使う
+            let newCnt = walls;
+            for (const i of nb) if (!capSet.has(i)) newCnt++;
+
+            // 自殺手チェック: 新しい石の連が全員飽和していたら禁止
+            const chainIdx = [];
+            const seenOwn = new Set();
+            for (const i of nb) {
+                if (st[i].p !== player) continue;
+                const cid = an.chainId[i];
+                if (seenOwn.has(cid)) continue;
+                seenOwn.add(cid);
+                chainIdx.push(...an.chains[cid]);
+            }
+            let libs = Math.max(0, MAX_LINK - newCnt);
+            for (const k of chainIdx) libs += Math.max(0, MAX_LINK - cntAfter(k));
+            if (libs === 0) return { ok: false, reason: 'suicide', linkCount };
+
+            // コウチェック: 取りを伴い、直前の着手前の局面に戻る手は禁止
+            if (capturedIdx.length > 0 && prevStones) {
+                const after = [];
+                for (let i = 0; i < st.length; i++) if (!capSet.has(i)) after.push(st[i]);
+                after.push({ x, y, p: player });
+                if (samePosition(after, prevStones)) return { ok: false, reason: 'ko', linkCount };
+            }
+            return { ok: true, captured: capturedIdx, linkCount, libs, nb, walls };
+        }
+
+        // 地の計算 (連続座標を 0.25R のセルに分けて塗りつぶし判定)
+        // 各石の「接続領域」(半径√2Rの円。壁に接続した石は壁までの垂線方向にも同じ幅で延びる) を除いた空き領域のうち、
+        //  - 境界が壁と「単一の同色の連」だけでできている (複数の連・敵石に接する領域は地にならない)
+        //  - 面積が 4R² 以上
+        // のものをその色の地とする。4R² 未満の領域は無視する (表示も計上もしない)。面積 4R² を 1目として換算する。
+        // 戻り値 unsafeIds: 自分の地に接していない連に属する石のid (死に石として扱う候補)
+        function calculateTerritory(stList) {
+            const sts = stList || stones;
+            const an = analyzeStones(sts);
+            const L = boardL();
+            const h = 0.25, lo = -1, BR = CIRCLE_R, BR2 = BR * BR;
+            const cols = Math.ceil((L + 2) / h);
+            const total = cols * cols;
+            const owner = new Uint8Array(total);
+            const ownerIdx = new Int32Array(total).fill(-1); // そのセルを覆っている石の sts 上の index
+            const bestD = new Float32Array(total).fill(1e9);
+            for (let si = 0; si < sts.length; si++) {
+                const s = sts[si];
+                const i0 = Math.max(0, Math.floor((s.x - BR - lo) / h));
+                const i1 = Math.min(cols - 1, Math.ceil((s.x + BR - lo) / h));
+                const j0 = Math.max(0, Math.floor((s.y - BR - lo) / h));
+                const j1 = Math.min(cols - 1, Math.ceil((s.y + BR - lo) / h));
+                for (let j = j0; j <= j1; j++) {
+                    const cy = lo + (j + 0.5) * h;
+                    for (let i = i0; i <= i1; i++) {
+                        const cx = lo + (i + 0.5) * h;
+                        const d2 = (cx - s.x) * (cx - s.x) + (cy - s.y) * (cy - s.y);
+                        const k = j * cols + i;
+                        if (d2 < BR2 && d2 < bestD[k]) { bestD[k] = d2; owner[k] = s.p; ownerIdx[k] = si; }
+                    }
+                }
+            }
+            // 壁に接続した石: 石から(見かけの)壁までの垂線に沿って接続領域を延ばす (壁との隙間を塞ぐ)
+            for (let si = 0; si < sts.length; si++) {
+                const s = sts[si];
+                for (const side of wallSidesAt(s.x, s.y)) {
+                    const f = wallFoot(side, s.x, s.y);
+                    const i0 = Math.max(0, Math.floor((Math.min(s.x, f.x) - BR - lo) / h));
+                    const i1 = Math.min(cols - 1, Math.ceil((Math.max(s.x, f.x) + BR - lo) / h));
+                    const j0 = Math.max(0, Math.floor((Math.min(s.y, f.y) - BR - lo) / h));
+                    const j1 = Math.min(cols - 1, Math.ceil((Math.max(s.y, f.y) + BR - lo) / h));
+                    const vx = f.x - s.x, vy = f.y - s.y, vv = vx * vx + vy * vy || 1;
+                    for (let j = j0; j <= j1; j++) {
+                        const cy = lo + (j + 0.5) * h;
+                        for (let i = i0; i <= i1; i++) {
+                            const k = j * cols + i;
+                            if (owner[k]) continue;
+                            const cx = lo + (i + 0.5) * h;
+                            const t = Math.max(0, Math.min(1, ((cx - s.x) * vx + (cy - s.y) * vy) / vv));
+                            const dx = cx - (s.x + t * vx), dy = cy - (s.y + t * vy);
+                            if (dx * dx + dy * dy < BR2) { owner[k] = s.p; ownerIdx[k] = si; }
+                        }
+                    }
+                }
+            }
+            const MIN_CELLS = Math.ceil(4 / (h * h) - 1e-9); // 4R² 未満の領域は無視
+            const visited = new Uint8Array(total);
+            const terr = new Uint8Array(total); // 1:黒の地, 2:白の地
+            const stack = new Int32Array(total);
+            const aliveChains = new Set();      // 自分の地に接している連
+            let cells1 = 0, cells2 = 0;
+            for (let start = 0; start < total; start++) {
+                if (visited[start] || owner[start] !== 0) continue;
+                let sp = 0, mask = 0;
+                const members = [];
+                const chainSet = new Set();
+                stack[sp++] = start;
+                visited[start] = 1;
+                while (sp > 0) {
+                    const k = stack[--sp];
+                    members.push(k);
+                    const ci = k % cols, cj = (k - ci) / cols;
+                    const around = [];
+                    if (ci > 0) around.push(k - 1);
+                    if (ci < cols - 1) around.push(k + 1);
+                    if (cj > 0) around.push(k - cols);
+                    if (cj < cols - 1) around.push(k + cols);
+                    for (const nk of around) {
+                        if (owner[nk] !== 0) {
+                            mask |= (owner[nk] === 1 ? 1 : 2);
+                            chainSet.add(an.chainId[ownerIdx[nk]]);
+                        } else if (!visited[nk]) { visited[nk] = 1; stack[sp++] = nk; }
+                    }
+                }
+                if (members.length < MIN_CELLS) continue;               // 小さすぎる領域は無視
+                if (chainSet.size !== 1 || (mask !== 1 && mask !== 2)) continue; // 境界が単一の同色の連でない
+                members.forEach(k => terr[k] = mask);
+                aliveChains.add([...chainSet][0]);
+                if (mask === 1) cells1 += members.length; else cells2 += members.length;
+            }
+            const unsafeIds = new Set();
+            an.chains.forEach((ch, cid) => {
+                if (!aliveChains.has(cid)) ch.forEach(i => unsafeIds.add(sts[i].id));
+            });
+            const per = h * h / 4; // 1セルあたりの目数
+            return { black: cells1 * per, white: cells2 * per, terr, cols, h, lo, unsafeIds };
+        }
+
+        // 対局中の地の表示用キャッシュ (石の配置と死に石マークが同じなら再計算しない)
+        let liveTerrCache = { key: null, val: null };
+        function getLiveTerritory() {
+            const key = BOARD_SIZE + '|' + stones.map(s => s.id + ':' + s.x + ':' + s.y + ':' + s.p).join(',')
+                + '|' + [...deadStones].sort((a, b) => a - b).join(',');
+            if (liveTerrCache.key !== key) {
+                liveTerrCache = { key, val: calculateTerritory(stones.filter(s => !deadStones.has(s.id))) };
+            }
+            return liveTerrCache.val;
+        }
+        // </CORE>
+
+        // ==========================================
+        // 5. AI思考ルーチン
+        // ==========================================
+        // <AI>
+        // 候補手: 格子点 + 既存の石の周囲(接続領域の内側) を列挙し、
+        // 取り・アタリ・自分の連の安全・勢力圏(最寄りの石による陣地)の増減で評価する。
+        // 得点が低い(=地を荒らすだけ)場合や、相手がパスして自分が優勢な場合はパスする。
+        function aiChooseMove() {
+            const L = boardL();
+            const me = turn, opp = me === 1 ? 2 : 1;
+            const G = L + 1, DMAX2 = 36;
+            const bestD = new Float32Array(G * G).fill(1e9);
+            const ownerA = new Uint8Array(G * G);
+            for (const s of stones) {
+                for (let gy = 0; gy < G; gy++) {
+                    for (let gx = 0; gx < G; gx++) {
+                        const dx = gx - s.x, dy = gy - s.y, d2 = dx * dx + dy * dy;
+                        const k = gy * G + gx;
+                        if (d2 < bestD[k]) { bestD[k] = d2; ownerA[k] = s.p; }
+                    }
+                }
+            }
+            const base = new Int8Array(G * G);
+            let baseSum = 0;
+            for (let k = 0; k < G * G; k++) {
+                base[k] = bestD[k] <= DMAX2 ? (ownerA[k] === me ? 1 : -1) : 0;
+                baseSum += base[k];
+            }
+            const margin = baseSum / 4 + (captures[me] - captures[opp]) * CAPTURE_VALUE + (me === 2 ? komi : -komi);
+
+            const cands = [];
+            for (let x = 0; x <= L; x++) for (let y = 0; y <= L; y++) cands.push([x, y]);
+            const radii = [2, 2.2, 2.4];
+            for (const s of stones) {
+                for (const r of radii) {
+                    for (let a = 0; a < 12; a++) {
+                        const ang = a * Math.PI / 6 + (r > 2.2 ? Math.PI / 12 : 0);
+                        cands.push([s.x + r * Math.cos(ang), s.y + r * Math.sin(ang)]);
+                    }
+                }
+            }
+
+            let best = null;
+            for (const c of cands) {
+                const x = Math.round(Math.min(L, Math.max(0, c[0])) * 1000) / 1000;
+                const y = Math.round(Math.min(L, Math.max(0, c[1])) * 1000) / 1000;
+                const res = evaluateMove(x, y, me);
+                if (!res.ok) continue;
+
+                let score = -2;
+                score += res.captured.length * 40;
+
+                // 自分の連の安全性
+                if (res.captured.length === 0) {
+                    if (res.libs <= 1) score -= 150;
+                    else if (res.libs === 2) score -= 25;
+                }
+
+                // 隣接する連への影響
+                const perChain = new Map();
+                for (const i of res.nb) {
+                    const cid = analysis.chainId[i];
+                    perChain.set(cid, (perChain.get(cid) || 0) + 1);
+                }
+                perChain.forEach((cntNear, cid) => {
+                    const ch = analysis.chains[cid];
+                    const color = stones[ch[0]].p;
+                    const before = analysis.chainLibs[cid];
+                    if (color === opp) {
+                        if (res.captured.includes(ch[0])) return;
+                        const after = before - cntNear;
+                        if (after <= 1) score += 60;
+                        else if (after <= 2) score += 18;
+                        else if (after <= 4) score += 5;
+                    } else {
+                        if (before <= 2 && res.libs > before) score += Math.min(30, (res.libs - before) * 10);
+                    }
+                });
+
+                // 勢力圏の増減 (1R刻みの最寄り石による陣地、距離6R以内)
+                let delta = 0;
+                const gx0 = Math.max(0, Math.ceil(x - 6)), gx1 = Math.min(L, Math.floor(x + 6));
+                const gy0 = Math.max(0, Math.ceil(y - 6)), gy1 = Math.min(L, Math.floor(y + 6));
+                for (let gy = gy0; gy <= gy1; gy++) {
+                    for (let gx = gx0; gx <= gx1; gx++) {
+                        const dx = gx - x, dy = gy - y, d2 = dx * dx + dy * dy;
+                        const k = gy * G + gx;
+                        if (d2 < bestD[k]) delta += (d2 <= DMAX2 ? 1 : 0) - base[k];
+                    }
+                }
+                score += delta * 4;
+                score += Math.random() * 1.5;
+
+                if (!best || score > best.score) best = { x, y, score };
+            }
+            if (!best || best.score < 6) return null;
+            if (consecutivePasses >= 1 && margin > 0) return null;
+            return best;
+        }
+        // </AI>
+
+        // ==========================================
+        // 永続化 (sessionStorage)
+        // リロードで対局状態が消えないよう保存する。
+        // sessionStorage はタブごとに独立なので、複数タブで別々の対局を進行できる。
+        // ==========================================
+        const STORAGE_KEY = 'jizaigo-save-v1';
+
+        function saveState() {
+            try {
+                sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    boardSize: BOARD_SIZE,
+                    pendingBoardSize,
+                    stones,
+                    nextStoneId,
+                    turn,
+                    captures,
+                    consecutivePasses,
+                    gameOver,
+                    gameResultData,
+                    gamePhase,
+                    deadStones: [...deadStones],
+                    prevStones,
+                    lastMove,
+                    history,
+                    gameMode,
+                    aiPlayer,
+                    myOnlineRole,
+                    onlineRoomId,
+                    themeId: currentTheme.id,
+                    soundEnabled: soundManager.enabled,
+                    showLinks,
+                    showTerritory,
+                    snapOn: snapToGrid
+                }));
+            } catch (e) { /* sessionStorage が使えない環境では保存しない */ }
+        }
+
+        function loadState() {
+            let s = null;
+            try {
+                s = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null');
+            } catch (e) { s = null; }
+            if (!s || ![9, 13, 19].includes(s.boardSize) || !Array.isArray(s.stones)) {
+                return false;
+            }
+            BOARD_SIZE = s.boardSize;
+            pendingBoardSize = s.pendingBoardSize || BOARD_SIZE;
+            stones = s.stones;
+            nextStoneId = s.nextStoneId || (stones.reduce((m, o) => Math.max(m, o.id), 0) + 1);
+            turn = s.turn === 2 ? 2 : 1;
+            captures = (s.captures && typeof s.captures === 'object') ? s.captures : { 1: 0, 2: 0 };
+            consecutivePasses = s.consecutivePasses || 0;
+            gameOver = !!s.gameOver;
+            gameResultData = s.gameResultData || null;
+            gamePhase = s.gamePhase || 'playing';
+            deadStones = new Set(s.deadStones || []);
+            prevStones = Array.isArray(s.prevStones) ? s.prevStones : null;
+            lastMove = s.lastMove || null;
+            history = Array.isArray(s.history) ? s.history : [];
+            gameMode = ['local', 'ai', 'online'].includes(s.gameMode) ? s.gameMode : 'local';
+            aiPlayer = s.aiPlayer === 1 ? 1 : 2;
+            myOnlineRole = s.myOnlineRole || null;
+            onlineRoomId = s.onlineRoomId || null;
+            if (s.themeId && THEMES[s.themeId]) currentTheme = THEMES[s.themeId];
+            if (s.soundEnabled === false) soundManager.enabled = false;
+            if (s.showLinks === false) showLinks = false;
+            showTerritory = s.showTerritory === true;
+            snapToGrid = s.snapOn === true;
+            refreshAnalysis();
+            if (gameOver && gamePhase === 'ended') territoryView = calculateTerritory();
+            return true;
+        }
+
+        // 復元した設定を設定モーダルのボタン表示にも反映
+        function syncSettingsUI() {
+            document.querySelectorAll('.btn-size').forEach(b => {
+                const active = parseInt(b.dataset.size) === pendingBoardSize;
+                b.classList.toggle('bg-neutral-900', active);
+                b.classList.toggle('text-white', active);
+            });
+            document.querySelectorAll('.btn-mode').forEach(b => {
+                const active = b.dataset.mode === gameMode;
+                b.classList.toggle('bg-neutral-900', active);
+                b.classList.toggle('text-white', active);
+            });
+            const aiBtnOn = 'py-1.5 rounded border text-xs font-bold bg-neutral-900 text-white';
+            const aiBtnOff = 'py-1.5 rounded border text-xs font-bold bg-white text-neutral-800 border-neutral-300';
+            btnAiPlayerBlack.className = aiPlayer === 2 ? aiBtnOn : aiBtnOff;
+            btnAiPlayerWhite.className = aiPlayer === 1 ? aiBtnOn : aiBtnOff;
+            aiOptions.classList.toggle('hidden', gameMode !== 'ai');
+            onlineOptions.classList.toggle('hidden', gameMode !== 'online');
+            setToggleButton(btnToggleSound, soundManager.enabled);
+            setToggleButton(btnToggleLinks, showLinks);
+            setToggleButton(btnToggleTerritory, showTerritory);
+            setToggleButton(btnToggleSnap, snapToGrid);
+        }
+
+        function setToggleButton(btn, on) {
+            btn.textContent = on ? 'ON' : 'OFF';
+            btn.classList.toggle('bg-neutral-900', on);
+            btn.classList.toggle('text-white', on);
+        }
+
+        // DOM Elements
+        const canvas = document.getElementById('boardCanvas');
+        const ctx = canvas.getContext('2d');
+        const appBody = document.getElementById('appBody');
+        const statusCard = document.getElementById('statusCard');
+        const turnIndicator = document.getElementById('turnIndicator');
+        const gameModeBadge = document.getElementById('gameModeBadge');
+        const blackCapturesEl = document.getElementById('blackCaptures');
+        const whiteCapturesEl = document.getElementById('whiteCaptures');
+        const komiDisplay = document.getElementById('komiDisplay');
+        const btnPass = document.getElementById('btnPass');
+        const btnResign = document.getElementById('btnResign');
+        const btnUndo = document.getElementById('btnUndo');
+        const btnConfirm = document.getElementById('btnConfirm');
+        const previewInfo = document.getElementById('previewInfo');
+        const undoModal = document.getElementById('undoModal');
+        const btnUndoConfirm = document.getElementById('btnUndoConfirm');
+        const btnUndoCancel = document.getElementById('btnUndoCancel');
+        const btnOpenSettings = document.getElementById('btnOpenSettings');
+        const btnCloseSettings = document.getElementById('btnCloseSettings');
+        const settingsModal = document.getElementById('settingsModal');
+        const aiOptions = document.getElementById('aiOptions');
+        const onlineOptions = document.getElementById('onlineOptions');
+        const btnAiPlayerBlack = document.getElementById('btnAiPlayerBlack');
+        const btnAiPlayerWhite = document.getElementById('btnAiPlayerWhite');
+        const btnCreateRoom = document.getElementById('btnCreateRoom');
+        const btnJoinRoom = document.getElementById('btnJoinRoom');
+        const inputRoomId = document.getElementById('inputRoomId');
+        const onlineRoomStatus = document.getElementById('onlineRoomStatus');
+        const btnToggleSound = document.getElementById('btnToggleSound');
+        const btnToggleLinks = document.getElementById('btnToggleLinks');
+        const btnToggleTerritory = document.getElementById('btnToggleTerritory');
+        const btnToggleSnap = document.getElementById('btnToggleSnap');
+        const btnStartNewGame = document.getElementById('btnStartNewGame');
+        const themeList = document.getElementById('themeList');
+        const resultModal = document.getElementById('resultModal');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultDetails = document.getElementById('resultDetails');
+        const btnViewBoard = document.getElementById('btnViewBoard');
+        const btnModalRestart = document.getElementById('btnModalRestart');
+        const bannerResult = document.getElementById('bannerResult');
+        const btnShowResultModal = document.getElementById('btnShowResultModal');
+        const aiThinkingOverlay = document.getElementById('aiThinkingOverlay');
+        const bannerDeadStones = document.getElementById('bannerDeadStones');
+        const btnCancelDeadStones = document.getElementById('btnCancelDeadStones');
+        const btnConfirmDeadStones = document.getElementById('btnConfirmDeadStones');
+
+        const REASON_TEXT = {
+            outside: '盤外です (石の中心は1線の内側に置けます)',
+            overlap: '他の石と重なっています (中心距離2R以上が必要)',
+                    suicide: '自殺手です',
+            ko: 'コウです (直前の局面に戻る手)'
+        };
+
+        // ==========================================
+        // 6. Canvas 描画
+        // ==========================================
+        window.addEventListener('resize', resizeCanvas);
+
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+            render();
+        }
+
+        // padding は「壁の帯」が見えるよう、路数に応じて決める
+        // (1線から外側R=石半径ぶんは石が置ける余白、その外側が壁)
+        function getBoardMetrics() {
+            const width = canvas.getBoundingClientRect().width;
+            const N = BOARD_SIZE;
+            const padding = width * (0.5 + 0.035 * (N - 1)) / N;
+            const Rpx = (width - padding * 2) / (2 * (N - 1));
+            return { width, padding, Rpx };
+        }
+
+        function getStarPoints(size) {
+            if (size === 9) {
+                return [{x:2,y:2}, {x:6,y:2}, {x:4,y:4}, {x:2,y:6}, {x:6,y:6}];
+            } else if (size === 13) {
+                return [{x:3,y:3}, {x:9,y:3}, {x:6,y:6}, {x:3,y:9}, {x:9,y:9}];
+            } else if (size === 19) {
+                return [
+                    {x:3,y:3}, {x:9,y:3}, {x:15,y:3},
+                    {x:3,y:9}, {x:9,y:9}, {x:15,y:9},
+                    {x:3,y:15}, {x:9,y:15}, {x:15,y:15}
+                ];
+            }
+            return [];
+        }
+
+        // プレビュー位置の補正:
+        //  - 盤の外にはみ出した位置は最寄りの1線上に寄せる
+        //  - 格子点への吸着は「画面上で約5px以内」かつ「吸着先に置ける」場合だけ働く
+        //    (置きたい位置が有効なのに、吸着先が無効なら吸着しない)
+        function effectivePos(raw) {
+            const L = boardL();
+            const r3 = (v) => Math.round(v * 1000) / 1000;
+            const x = Math.min(L, Math.max(0, raw.x));
+            const y = Math.min(L, Math.max(0, raw.y));
+            const pos = { x: r3(x), y: r3(y) };
+            if (!snapToGrid) return pos;
+            const { Rpx } = getBoardMetrics();
+            const tol = Math.min(0.3, 5 / Rpx);
+            const gx = Math.round(x / 2) * 2, gy = Math.round(y / 2) * 2;
+            if (gx > L || gy > L || Math.hypot(gx - x, gy - y) >= tol) return pos;
+            const snapped = { x: gx, y: gy };
+            if (!evaluateMove(gx, gy, turn).ok && evaluateMove(pos.x, pos.y, turn).ok) return pos;
+            return snapped;
+        }
+
+        function render() {
+            const { width: W, padding: p, Rpx } = getBoardMetrics();
+            const L = boardL();
+            const X = (u) => p + u * Rpx;
+            const th = currentTheme;
+
+            // 背景 + 壁の帯 (1線から R より外側)
+            ctx.clearRect(0, 0, W, W);
+            ctx.fillStyle = th.boardBg;
+            ctx.fillRect(0, 0, W, W);
+            const a = p - Rpx;          // 壁の境界 (1線から R 外側)
+            const size = W - a * 2;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, W, W);
+            ctx.rect(a, a, size, size);
+            ctx.clip('evenodd');
+            ctx.fillStyle = th.lineColor;
+            ctx.globalAlpha = 0.14;
+            ctx.fillRect(0, 0, W, W);
+            ctx.globalAlpha = 0.22;
+            ctx.strokeStyle = th.lineColor;
+            ctx.lineWidth = 1;
+            for (let t = -W; t < 2 * W; t += 7) {
+                ctx.beginPath();
+                ctx.moveTo(t, 0);
+                ctx.lineTo(t + W, W);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // 壁の境界線
+            ctx.strokeStyle = th.lineColor;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
+            ctx.strokeRect(a, a, size, size);
+            ctx.setLineDash([]);
+
+            // 格子線
+            ctx.strokeStyle = th.lineColor;
+            ctx.lineWidth = 1;
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const pos = X(2 * i);
+                ctx.beginPath();
+                ctx.moveTo(pos, X(0));
+                ctx.lineTo(pos, X(L));
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(X(0), pos);
+                ctx.lineTo(X(L), pos);
+                ctx.stroke();
+            }
+            // 外枠強調 (1線)
+            ctx.lineWidth = 2;
+            ctx.strokeRect(X(0), X(0), X(L) - X(0), X(L) - X(0));
+
+            // 星
+            ctx.fillStyle = th.starColor;
+            getStarPoints(BOARD_SIZE).forEach(pt => {
+                ctx.beginPath();
+                ctx.arc(X(2 * pt.x), X(2 * pt.y), 3.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 終局後の地の表示
+            let tv = territoryView, unsafeIds = null;
+            if (!tv && !gameOver) {
+                if (gamePhase === 'dead_stone_selection') {
+                    const info = getLiveTerritory();
+                    unsafeIds = info.unsafeIds;   // 死に石判定: 自分の地に接していない連をハイライト
+                    if (showTerritory) tv = info;
+                } else if (gamePhase === 'playing' && showTerritory) {
+                    tv = getLiveTerritory();
+                }
+            }
+            if (tv) drawTerritory(tv, Rpx, p);
+
+            // 接続線 (敵石・壁との接続は薄灰色、同じ色どうしの接続は石の色。どちらも石より奥)
+            drawGrayLinks(p, Rpx);
+            if (showLinks && analysis) drawLinks(p, Rpx);
+
+            // 石
+            drawStones(p, Rpx);
+            if (unsafeIds) drawUnsafeStones(unsafeIds, p, Rpx);
+
+            // 直前に置いた石のハイライト(緑系)
+            drawLastMove(p, Rpx);
+
+            // プレビュー
+            drawPreview(p, Rpx);
+        }
+
+        // 地の表示: 面積を塗りつぶし、黒・白どちらの地もテーマの石の色で縁取って見えるようにする
+        function drawTerritory(tv, Rpx, p) {
+            const th = currentTheme;
+            const cols = tv.cols, cell = tv.h * Rpx;
+            ctx.save();
+            for (const t of [1, 2]) {
+                ctx.globalAlpha = t === 1 ? 0.3 : 0.55;
+                ctx.fillStyle = t === 1 ? th.p1Fill : th.p2Fill;
+                for (let k = 0; k < tv.terr.length; k++) {
+                    if (tv.terr[k] !== t) continue;
+                    const ci = k % cols, cj = (k - ci) / cols;
+                    ctx.fillRect(p + (tv.lo + ci * tv.h) * Rpx, p + (tv.lo + cj * tv.h) * Rpx, cell + 0.5, cell + 0.5);
+                }
+                // 縁取り (地の境界線)
+                ctx.globalAlpha = 0.8;
+                ctx.strokeStyle = t === 1 ? th.p1Stroke : th.p2Stroke;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash(t === 1 ? [] : [4, 3]);
+                ctx.beginPath();
+                for (let k = 0; k < tv.terr.length; k++) {
+                    if (tv.terr[k] !== t) continue;
+                    const ci = k % cols, cj = (k - ci) / cols;
+                    const x0 = p + (tv.lo + ci * tv.h) * Rpx, y0 = p + (tv.lo + cj * tv.h) * Rpx;
+                    const x1 = x0 + cell, y1 = y0 + cell;
+                    if (ci === 0 || tv.terr[k - 1] !== t) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); }
+                    if (ci === cols - 1 || tv.terr[k + 1] !== t) { ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); }
+                    if (cj === 0 || tv.terr[k - cols] !== t) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); }
+                    if (cj === cols - 1 || tv.terr[k + cols] !== t) { ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); }
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawLinks(p, Rpx) {
+            const th = currentTheme;
+            const an = analysis;
+            ctx.save();
+            ctx.lineCap = 'round';
+            for (let i = 0; i < stones.length; i++) {
+                for (const j of an.nbrs[i]) {
+                    if (j < i || stones[j].p !== stones[i].p) continue;
+                    const s1 = stones[i], s2 = stones[j];
+                    const fill = s1.p === 1 ? th.p1Fill : th.p2Fill;
+                    const stroke = s1.p === 1 ? th.p1Stroke : th.p2Stroke;
+                    const dead = deadStones.has(s1.id) || deadStones.has(s2.id);
+                    ctx.globalAlpha = dead ? 0.3 : 1;
+                    ctx.beginPath();
+                    ctx.moveTo(p + s1.x * Rpx, p + s1.y * Rpx);
+                    ctx.lineTo(p + s2.x * Rpx, p + s2.y * Rpx);
+                    ctx.strokeStyle = stroke;
+                    ctx.lineWidth = Rpx * 0.34 + 3;
+                    ctx.stroke();
+                    ctx.strokeStyle = fill;
+                    ctx.lineWidth = Rpx * 0.34;
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
+
+        // 敵石との接続は中心どうしを結ぶ線、壁との接続は壁への垂線で、薄灰色で表示
+        function drawGrayLinks(p, Rpx) {
+            if (!showLinks || !analysis) return;
+            const an = analysis;
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(156,163,175,0.95)';
+            ctx.fillStyle = 'rgba(156,163,175,0.95)';
+            for (let i = 0; i < stones.length; i++) {
+                const s1 = stones[i];
+                for (const j of an.nbrs[i]) {
+                    if (j <= i || stones[j].p === s1.p) continue;
+                    const s2 = stones[j];
+                    ctx.globalAlpha = (deadStones.has(s1.id) || deadStones.has(s2.id)) ? 0.3 : 1;
+                    ctx.beginPath();
+                    ctx.moveTo(p + s1.x * Rpx, p + s1.y * Rpx);
+                    ctx.lineTo(p + s2.x * Rpx, p + s2.y * Rpx);
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = deadStones.has(s1.id) ? 0.3 : 1;
+                for (const side of wallSidesAt(s1.x, s1.y)) {
+                    const f = wallFoot(side, s1.x, s1.y);
+                    ctx.beginPath();
+                    ctx.moveTo(p + s1.x * Rpx, p + s1.y * Rpx);
+                    ctx.lineTo(p + f.x * Rpx, p + f.y * Rpx);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(p + f.x * Rpx, p + f.y * Rpx, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawStones(p, Rpx) {
+            const th = currentTheme;
+            for (const s of stones) {
+                const cx = p + s.x * Rpx, cy = p + s.y * Rpx;
+                const fill = s.p === 1 ? th.p1Fill : th.p2Fill;
+                const stroke = s.p === 1 ? th.p1Stroke : th.p2Stroke;
+                const isDead = deadStones.has(s.id);
+                ctx.save();
+                if (isDead) ctx.globalAlpha = 0.35;
+                ctx.beginPath();
+                ctx.arc(cx, cy, Rpx - 1, 0, Math.PI * 2);
+                ctx.fillStyle = fill;
+                ctx.fill();
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+                if (isDead) drawDeadMarker(cx, cy, Rpx);
+            }
+        }
+
+        // 死に石判定 (自分の地に接していない連) のハイライト: オレンジの輪
+        function drawUnsafeStones(ids, p, Rpx) {
+            ctx.save();
+            for (const s of stones) {
+                if (!ids.has(s.id) || deadStones.has(s.id)) continue;
+                const cx = p + s.x * Rpx, cy = p + s.y * Rpx;
+                ctx.beginPath();
+                ctx.arc(cx, cy, Rpx - 1, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.35)';
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx, cy, Rpx + 2, 0, Math.PI * 2);
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 3]);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawLastMove(p, Rpx) {
+            if (!lastMove) return;
+            const s = stones.find(o => o.id === lastMove.id);
+            if (!s) return;
+            ctx.beginPath();
+            ctx.arc(p + s.x * Rpx, p + s.y * Rpx, Rpx - 1, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.38)';
+            ctx.fill();
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        function drawDeadMarker(cx, cy, r) {
+            ctx.save();
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 3;
+            const offset = r * 0.45;
+            ctx.beginPath();
+            ctx.moveTo(cx - offset, cy - offset);
+            ctx.lineTo(cx + offset, cy + offset);
+            ctx.moveTo(cx + offset, cy - offset);
+            ctx.lineTo(cx - offset, cy + offset);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawPreview(p, Rpx) {
+            if (gameOver || gamePhase !== 'playing' || !previewRaw || !isMyTurn()) {
+                updatePreviewInfo(null);
+                return;
+            }
+            const pos = effectivePos(previewRaw);
+            const res = evaluateMove(pos.x, pos.y, turn);
+            const th = currentTheme;
+            const cx = p + pos.x * Rpx, cy = p + pos.y * Rpx;
+
+            // 接続領域 (半径√2Rの円) と、接続する石への線
+            ctx.save();
+            ctx.setLineDash([5, 4]);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = res.ok ? th.lineColor : '#ef4444';
+            ctx.globalAlpha = 0.55;
+            ctx.beginPath();
+            ctx.arc(cx, cy, CIRCLE_R * Rpx, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.45;
+            if (analysis) {
+                for (const s of stones) {
+                    const d2 = (s.x - pos.x) * (s.x - pos.x) + (s.y - pos.y) * (s.y - pos.y);
+                    if (d2 < LINK_D2 - EPS) {
+                        ctx.beginPath();
+                        ctx.moveTo(cx, cy);
+                        ctx.lineTo(p + s.x * Rpx, p + s.y * Rpx);
+                        ctx.stroke();
+                    }
+                }
+            }
+            for (const side of wallSidesAt(pos.x, pos.y)) {
+                const f = wallFoot(side, pos.x, pos.y);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(p + f.x * Rpx, p + f.y * Rpx);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // プレビュー石 (配置可能 = 手番色の半透明 / 配置不可 = 赤)
+            const fill = res.ok
+                ? (turn === 1 ? 'rgba(0,0,0,0.38)' : 'rgba(255,255,255,0.70)')
+                : 'rgba(239,68,68,0.30)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, Rpx - 1, 0, Math.PI * 2);
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.strokeStyle = res.ok ? th.lineColor : '#ef4444';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            updatePreviewInfo(res);
+        }
+
+        function updatePreviewInfo(res) {
+            if (!res) {
+                previewInfo.textContent = '';
+                btnConfirm.disabled = true;
+                return;
+            }
+            if (res.ok) {
+                let t = `接続 ${res.linkCount} (飽和数 ${MAX_LINK})`;
+                if (res.captured.length > 0) t += ` ・ ${res.captured.length}子を取れます`;
+                previewInfo.textContent = t;
+                previewInfo.style.color = '';
+                btnConfirm.disabled = false;
+            } else {
+                previewInfo.textContent = `置けません: ${REASON_TEXT[res.reason] || ''}`;
+                previewInfo.style.color = '#ef4444';
+                btnConfirm.disabled = true;
+            }
+        }
+
+        // ==========================================
+        // 7. 入力処理
+        // ==========================================
+        canvas.style.touchAction = 'none';
+        let touchDrag = null; // タッチ操作中のドラッグ状態
+
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('pointermove', onPointerMove);
+        canvas.addEventListener('pointerup', onPointerUp);
+        canvas.addEventListener('pointercancel', () => { touchDrag = null; });
+        canvas.addEventListener('pointerleave', (e) => {
+            if (e.pointerType === 'touch') return;
+            if (gameOver) return;
+            previewRaw = null;
+            render();
+        });
+        canvas.addEventListener('click', onClick);
+
+        function pointerToUnits(e) {
+            const { padding, Rpx } = getBoardMetrics();
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (e.clientX - rect.left - padding) / Rpx,
+                y: (e.clientY - rect.top - padding) / Rpx
+            };
+        }
+
+        function clampRaw(pt) {
+            const L = boardL();
+            return {
+                x: Math.max(-2, Math.min(L + 2, pt.x)),
+                y: Math.max(-2, Math.min(L + 2, pt.y))
+            };
+        }
+
+        function onPointerDown(e) {
+            lastPointerType = e.pointerType || 'mouse';
+            if (lastPointerType !== 'touch') return;
+            setTouchUI(true);
+            soundManager.init();
+            if (gameOver || gamePhase !== 'playing' || !isMyTurn()) {
+                touchDrag = { id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, base: null };
+                return;
+            }
+            const pt = clampRaw(pointerToUnits(e));
+            if (!previewRaw) previewRaw = pt;
+            touchDrag = { id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, base: { ...previewRaw } };
+            try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+            render();
+        }
+
+        function onPointerMove(e) {
+            lastPointerType = e.pointerType || 'mouse';
+            if (lastPointerType === 'touch') {
+                if (!touchDrag || touchDrag.id !== e.pointerId || !touchDrag.base) return;
+                const dx = e.clientX - touchDrag.sx, dy = e.clientY - touchDrag.sy;
+                if (!touchDrag.moved && Math.hypot(dx, dy) < 6) return;
+                touchDrag.moved = true;
+                // スワイプ量に応じてマーカーを相対移動 (指で隠れないように)
+                const { Rpx } = getBoardMetrics();
+                previewRaw = clampRaw({ x: touchDrag.base.x + dx / Rpx, y: touchDrag.base.y + dy / Rpx });
+                render();
+                return;
+            }
+            if (gameOver || gamePhase !== 'playing' || !isMyTurn()) return;
+            previewRaw = clampRaw(pointerToUnits(e));
+            render();
+        }
+
+        function onPointerUp(e) {
+            if ((e.pointerType || 'mouse') !== 'touch') return;
+            const drag = touchDrag;
+            touchDrag = null;
+            if (!drag || drag.id !== e.pointerId || drag.moved) return;
+            // タップ
+            if (gameOver) return;
+            if (gamePhase === 'dead_stone_selection') {
+                toggleDeadChainAt(pointerToUnits(e));
+                return;
+            }
+            if (gamePhase !== 'playing' || !isMyTurn()) return;
+            previewRaw = clampRaw(pointerToUnits(e));
+            render();
+        }
+
+        function onClick(e) {
+            soundManager.init();
+            if (lastPointerType === 'touch') return; // タッチ後の疑似クリックは無視
+            if (gameOver) return;
+            if (gamePhase === 'dead_stone_selection') {
+                toggleDeadChainAt(pointerToUnits(e));
+                return;
+            }
+            if (gamePhase !== 'playing' || !isMyTurn()) return;
+            previewRaw = clampRaw(pointerToUnits(e));
+            confirmPlacement();
+        }
+
+        function setTouchUI(on) {
+            isTouchUI = on;
+            btnConfirm.classList.toggle('hidden', !on);
+        }
+
+        // プレビュー位置に石を置く (置けない場合は何もしない)
+        function confirmPlacement() {
+            if (gameOver || gamePhase !== 'playing' || !isMyTurn() || !previewRaw) return;
+            const pos = effectivePos(previewRaw);
+            const res = evaluateMove(pos.x, pos.y, turn);
+            if (!res.ok) { render(); return; }
+            executeMove(pos.x, pos.y, turn, res);
+            previewRaw = null;
+            render();
+        }
+
+        btnConfirm.addEventListener('click', () => {
+            soundManager.init();
+            confirmPlacement();
+        });
+
+        function toggleDeadChainAt(pt) {
+            if (!analysis) return;
+            let bi = -1, bd = 1.3 * 1.3;
+            for (let i = 0; i < stones.length; i++) {
+                const d2 = (stones[i].x - pt.x) * (stones[i].x - pt.x) + (stones[i].y - pt.y) * (stones[i].y - pt.y);
+                if (d2 < bd) { bd = d2; bi = i; }
+            }
+            if (bi < 0) return;
+            const chain = analysis.chains[analysis.chainId[bi]];
+            const isDead = deadStones.has(stones[bi].id);
+            chain.forEach(i => {
+                if (isDead) deadStones.delete(stones[i].id);
+                else deadStones.add(stones[i].id);
+            });
+            soundManager.playClick();
+            render();
+            saveState();
+        }
+
+        function isMyTurn() {
+            if (gameMode === 'ai') {
+                return turn !== aiPlayer;
+            } else if (gameMode === 'online') {
+                return turn === myOnlineRole;
+            }
+            return true;
+        }
+
+        // ==========================================
+        // 8. 着手の実行
+        // ==========================================
+        function executeMove(x, y, player, res) {
+            // 1手戻る用に着手前の状態を退避
+            history.push({
+                stones: [...stones],
+                nextStoneId,
+                captures: { ...captures },
+                turn,
+                consecutivePasses,
+                prevStones,
+                lastMove
+            });
+
+            prevStones = stones.map(s => ({ x: s.x, y: s.y, p: s.p })); // コウ判定用に着手前の局面を保存
+
+            const capSet = new Set(res.captured);
+            const remaining = stones.filter((_, i) => !capSet.has(i));
+            const ns = { id: nextStoneId++, x, y, p: player };
+            remaining.push(ns);
+            stones = remaining;
+            lastMove = { player, x, y, id: ns.id };
+
+            const opponent = player === 1 ? 2 : 1;
+            if (res.captured.length > 0) {
+                captures[player] += res.captured.length;
+                soundManager.playCapture();
+            } else {
+                soundManager.playPlace();
+            }
+            refreshAnalysis();
+
+            consecutivePasses = 0;
+            turn = opponent;
+            updateUI();
+
+            // オンライン同期
+            if (gameMode === 'online' && onlineRoomId) {
+                syncOnlineState();
+            }
+
+            saveState();
+
+            // AI思考トリガー
+            if (!gameOver && gameMode === 'ai' && turn === aiPlayer) {
+                triggerAiMove();
+            }
+        }
+
+        function triggerAiMove() {
+            aiThinkingOverlay.classList.remove('hidden');
+            setTimeout(() => {
+                if (gameOver || gamePhase !== 'playing') {
+                    aiThinkingOverlay.classList.add('hidden');
+                    return;
+                }
+                const best = aiChooseMove();
+                aiThinkingOverlay.classList.add('hidden');
+                if (best) {
+                    const res = evaluateMove(best.x, best.y, turn);
+                    if (res.ok) {
+                        executeMove(best.x, best.y, turn, res);
+                        return;
+                    }
+                }
+                handlePass(true); // 候補手がない・打つ価値がない場合はパス
+            }, 400 + Math.random() * 300);
+        }
+
+        // ==========================================
+        // 9. パス・投了・1手戻る & 終局計算
+        // ==========================================
+        btnPass.addEventListener('click', () => handlePass(false));
+        btnResign.addEventListener('click', handleResign);
+
+        // 戻せるのは「最後のアクションが着手」の時だけ (パスを跨いだ巻き戻しは不可)
+        function canUndo() {
+            if (gameOver || gamePhase !== 'playing' || history.length === 0 || consecutivePasses !== 0) {
+                return false;
+            }
+            if (gameMode === 'online') {
+                // 自分の最終手だけを戻せる (相手の手は取り消せない)
+                return !!(lastMove && lastMove.player === myOnlineRole);
+            }
+            if (gameMode === 'ai' && turn === aiPlayer) {
+                return false; // AI思考中は戻せない
+            }
+            return true;
+        }
+
+        function undoMove() {
+            if (!canUndo()) return;
+            let snap = history.pop();
+            // AI対戦ではAIの手もまとめて巻き戻し、必ず人間の手番に戻す
+            if (gameMode === 'ai') {
+                while (snap && snap.turn === aiPlayer && history.length > 0) {
+                    snap = history.pop();
+                }
+            }
+            stones = snap.stones;
+            nextStoneId = Math.max(nextStoneId, snap.nextStoneId || 1);
+            captures = snap.captures;
+            turn = snap.turn;
+            consecutivePasses = snap.consecutivePasses;
+            prevStones = snap.prevStones;
+            lastMove = snap.lastMove;
+            previewRaw = null;
+            refreshAnalysis();
+            updateUI();
+
+            if (gameMode === 'online' && onlineRoomId) {
+                syncOnlineState();
+            }
+            saveState();
+
+            // 巻き戻した結果がAIの手番になった場合は打ち直させる
+            if (!gameOver && gameMode === 'ai' && turn === aiPlayer) {
+                triggerAiMove();
+            }
+        }
+
+        btnUndo.addEventListener('click', () => {
+            soundManager.playClick();
+            if (canUndo()) undoModal.classList.remove('hidden');
+        });
+        btnUndoCancel.addEventListener('click', () => {
+            soundManager.playClick();
+            undoModal.classList.add('hidden');
+        });
+        btnUndoConfirm.addEventListener('click', () => {
+            soundManager.playClick();
+            undoModal.classList.add('hidden');
+            undoMove();
+        });
+
+        function handlePass(byAi) {
+            soundManager.playClick();
+            if (gameOver || gamePhase !== 'playing') return;
+            if (!byAi && !isMyTurn()) return;
+
+            prevStones = null; // パスでコウ制限は解除
+            previewRaw = null;
+            consecutivePasses++;
+            if (consecutivePasses >= 2) {
+                startDeadStoneSelectionPhase();
+                if (gameMode === 'online' && onlineRoomId) {
+                    syncOnlineState();
+                }
+            } else {
+                turn = turn === 1 ? 2 : 1;
+                updateUI();
+
+                if (gameMode === 'online' && onlineRoomId) {
+                    syncOnlineState();
+                }
+                if (!gameOver && gameMode === 'ai' && turn === aiPlayer) {
+                    triggerAiMove();
+                }
+            }
+            saveState();
+        }
+
+        function startDeadStoneSelectionPhase() {
+            gamePhase = 'dead_stone_selection';
+            previewRaw = null;
+            bannerDeadStones.classList.remove('hidden');
+            updateUI();
+        }
+
+        btnCancelDeadStones.addEventListener('click', () => {
+            soundManager.playClick();
+            gamePhase = 'playing';
+            consecutivePasses = 0;
+            deadStones.clear();
+            bannerDeadStones.classList.add('hidden');
+            updateUI();
+            saveState();
+            if (gameMode === 'online' && onlineRoomId) syncOnlineState();
+            if (!gameOver && gameMode === 'ai' && turn === aiPlayer) triggerAiMove();
+        });
+
+        btnConfirmDeadStones.addEventListener('click', () => {
+            soundManager.playClick();
+            // 死に石をアゲハマに加算して盤面から除去
+            const dead = stones.filter(s => deadStones.has(s.id));
+            dead.forEach(s => {
+                const opponent = s.p === 1 ? 2 : 1;
+                captures[opponent]++;
+            });
+            stones = stones.filter(s => !deadStones.has(s.id));
+            refreshAnalysis();
+            deadStones.clear();
+            bannerDeadStones.classList.add('hidden');
+            gamePhase = 'ended';
+            endGameByScore();
+        });
+
+        function handleResign() {
+            soundManager.playClick();
+            if (gameOver || !isMyTurn()) return;
+
+            const loser = turn;
+            const winner = loser === 1 ? 2 : 1;
+            const winnerName = winner === 1 ? '黒' : '白';
+
+            gameOver = true;
+            previewRaw = null;
+            gameResultData = {
+                title: `${winnerName}の投了勝ち`,
+                details: `${loser === 1 ? '黒 (1P)' : '白 (2P)'} が投了しました。`
+            };
+
+            soundManager.playWin();
+            showResultModal();
+            updateUI();
+
+            if (gameMode === 'online' && onlineRoomId) {
+                syncOnlineState();
+            }
+            saveState();
+        }
+
+        const fmt = (v) => (Math.round(v * 10) / 10).toString();
+
+        function endGameByScore() {
+            gameOver = true;
+            const territory = calculateTerritory();
+            territoryView = territory;
+
+            const blackTotal = territory.black + captures[1] * CAPTURE_VALUE;
+            const whiteTotal = territory.white + captures[2] * CAPTURE_VALUE + komi;
+            const diff = Math.abs(blackTotal - whiteTotal);
+
+            let winnerTitle = '';
+            if (blackTotal > whiteTotal) winnerTitle = '黒の勝ち';
+            else if (whiteTotal > blackTotal) winnerTitle = '白の勝ち';
+            else winnerTitle = '引き分け';
+
+            gameResultData = {
+                title: `${winnerTitle} (${fmt(diff)} 目差)`,
+                details: `
+                    <div class="flex justify-between"><span>黒の地:</span> <strong>${fmt(territory.black)}</strong></div>
+                    <div class="flex justify-between"><span>黒のアゲハマ:</span> <strong>${captures[1]} × ${CAPTURE_VALUE} = ${fmt(captures[1] * CAPTURE_VALUE)}</strong></div>
+                    <div class="flex justify-between font-bold border-t pt-1"><span>黒合計:</span> <span>${fmt(blackTotal)}</span></div>
+                    <div class="my-1 border-b border-current/10"></div>
+                    <div class="flex justify-between"><span>白の地:</span> <strong>${fmt(territory.white)}</strong></div>
+                    <div class="flex justify-between"><span>白のアゲハマ:</span> <strong>${captures[2]} × ${CAPTURE_VALUE} = ${fmt(captures[2] * CAPTURE_VALUE)}</strong></div>
+                    <div class="flex justify-between"><span>コミ:</span> <strong>${komi}</strong></div>
+                    <div class="flex justify-between font-bold border-t pt-1"><span>白合計:</span> <span>${fmt(whiteTotal)}</span></div>
+                `
+            };
+
+            soundManager.playWin();
+            showResultModal();
+            updateUI();
+
+            if (gameMode === 'online' && onlineRoomId) {
+                syncOnlineState();
+            }
+            saveState();
+        }
+
+        function showResultModal() {
+            resultTitle.textContent = gameResultData.title;
+            resultDetails.innerHTML = gameResultData.details;
+            resultModal.classList.remove('hidden');
+        }
+
+        btnViewBoard.addEventListener('click', () => {
+            resultModal.classList.add('hidden');
+            bannerResult.classList.remove('hidden');
+        });
+
+        btnShowResultModal.addEventListener('click', () => {
+            resultModal.classList.remove('hidden');
+        });
+
+        btnModalRestart.addEventListener('click', () => {
+            resultModal.classList.add('hidden');
+            bannerResult.classList.add('hidden');
+            resetGame();
+        });
+
+        // ==========================================
+        // 10. PeerJS オンライン対戦機能 (WebRTC P2P・サーバー不要)
+        // ==========================================
+        // PeerJSの無料シグナリングサーバーを使って、2人のブラウザ間で
+        // 直接(P2P)ゲーム状態をやり取りします。バックエンドのデプロイは不要です。
+
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 7).toUpperCase();
+        }
+
+        function cleanupPeer() {
+            if (conn) {
+                try { conn.close(); } catch (e) { /* noop */ }
+                conn = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch (e) { /* noop */ }
+                peer = null;
+            }
+        }
+
+        // 部屋作成: ルームIDをPeerJSの自分のIDとして登録し、相手の接続を待つ
+        function tryCreateRoom(retriesLeft) {
+            return new Promise((resolve, reject) => {
+                const roomCode = generateRoomCode();
+                const fullId = ROOM_ID_PREFIX + roomCode.toLowerCase();
+                const p = new Peer(fullId, { debug: 0 });
+                let settled = false;
+
+                p.on('open', () => {
+                    settled = true;
+                    resolve({ peerObj: p, roomCode });
+                });
+
+                p.on('error', (err) => {
+                    if (settled) return;
+                    if (err.type === 'unavailable-id' && retriesLeft > 0) {
+                        try { p.destroy(); } catch (e) { /* noop */ }
+                        tryCreateRoom(retriesLeft - 1).then(resolve).catch(reject);
+                    } else {
+                        reject(err);
+                    }
+                });
+            });
+        }
+
+        btnCreateRoom.addEventListener('click', async () => {
+            soundManager.playClick();
+            cleanupPeer();
+            btnCreateRoom.disabled = true;
+            btnJoinRoom.disabled = true;
+            onlineRoomStatus.textContent = "ルーム作成中...";
+
+            try {
+                const { peerObj, roomCode } = await tryCreateRoom(3);
+                peer = peerObj;
+                onlineRoomId = roomCode;
+                myOnlineRole = 1; // ホスト = 黒
+                isOnlineHost = true;
+
+                onlineRoomStatus.textContent = `ルームID: ${roomCode} (相手待機中...)`;
+                inputRoomId.value = roomCode;
+
+                peer.on('connection', (c) => {
+                    if (conn) { // 既に対戦相手が接続済みなら追加接続を拒否
+                        c.close();
+                        return;
+                    }
+                    conn = c;
+                    setupConnection();
+                    conn.on('open', () => {
+                        onlineRoomStatus.textContent = `対局開始！ (あなた: 黒手番)`;
+                        resetGame(); // ホスト側で新規対局を開始し、初期状態をゲストへ送信
+                        syncOnlineState();
+                    });
+                });
+
+                peer.on('disconnected', () => {
+                    onlineRoomStatus.textContent = "シグナリングサーバーとの接続が切れました";
+                });
+            } catch (err) {
+                console.error(err);
+                onlineRoomStatus.textContent = "部屋作成エラー。もう一度お試しください";
+            } finally {
+                btnCreateRoom.disabled = false;
+                btnJoinRoom.disabled = false;
+            }
+        });
+
+        // 部屋参加: ホストのルームIDへ直接P2P接続する
+        btnJoinRoom.addEventListener('click', () => {
+            soundManager.playClick();
+            const roomCode = inputRoomId.value.trim().toUpperCase();
+            if (roomCode.length !== 5) {
+                onlineRoomStatus.textContent = "5桁のIDを入力してください";
+                return;
+            }
+
+            cleanupPeer();
+            btnCreateRoom.disabled = true;
+            btnJoinRoom.disabled = true;
+            onlineRoomStatus.textContent = "接続中...";
+
+            const fullId = ROOM_ID_PREFIX + roomCode.toLowerCase();
+            peer = new Peer({ debug: 0 });
+            myOnlineRole = 2; // ゲスト = 白
+            isOnlineHost = false;
+            onlineRoomId = roomCode;
+
+            peer.on('open', () => {
+                conn = peer.connect(fullId, { reliable: true });
+                setupConnection();
+
+                conn.on('open', () => {
+                    onlineRoomStatus.textContent = `参加完了！(あなた: 白手番・対局開始を待っています)`;
+                    btnCreateRoom.disabled = false;
+                    btnJoinRoom.disabled = false;
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+                if (err.type === 'peer-unavailable') {
+                    onlineRoomStatus.textContent = "部屋が見つかりません";
+                } else {
+                    onlineRoomStatus.textContent = "接続エラーが発生しました";
+                }
+                btnCreateRoom.disabled = false;
+                btnJoinRoom.disabled = false;
+            });
+
+            peer.on('disconnected', () => {
+                onlineRoomStatus.textContent = "シグナリングサーバーとの接続が切れました";
+            });
+        });
+
+        // データ受信・切断ハンドラの共通セットアップ
+        function setupConnection() {
+            conn.on('data', (data) => {
+                applyOnlineState(data);
+            });
+            conn.on('close', () => {
+                onlineRoomStatus.textContent = "相手が切断しました";
+            });
+            conn.on('error', (err) => {
+                console.error("Connection error:", err);
+            });
+        }
+
+        // 相手から受信したゲーム状態をローカルに反映
+        function applyOnlineState(data) {
+            if (data.boardSize && data.boardSize !== BOARD_SIZE) {
+                BOARD_SIZE = data.boardSize;
+                pendingBoardSize = BOARD_SIZE;
+                resizeCanvas();
+            }
+            stones = Array.isArray(data.stones) ? data.stones : [];
+            nextStoneId = data.nextStoneId || (stones.reduce((m, o) => Math.max(m, o.id), 0) + 1);
+            turn = data.turn;
+            captures = data.captures;
+            consecutivePasses = data.consecutivePasses;
+            gameOver = data.gameOver;
+            gameResultData = data.gameResultData;
+            gamePhase = data.gamePhase || 'playing';
+            prevStones = data.prevStones || null;
+            lastMove = data.lastMove || null;
+            previewRaw = null;
+            refreshAnalysis();
+
+            if (gamePhase === 'dead_stone_selection') {
+                bannerDeadStones.classList.remove('hidden');
+            } else {
+                bannerDeadStones.classList.add('hidden');
+            }
+            deadStones = new Set(data.deadStones || []);
+            history = Array.isArray(data.history) ? data.history : history;
+
+            territoryView = (gameOver && gamePhase === 'ended') ? calculateTerritory() : null;
+            if (gameOver && gameResultData) {
+                showResultModal();
+            }
+
+            updateUI();
+            saveState();
+        }
+
+        // 自分の手番操作の後に、現在のゲーム状態を相手へ送信
+        function syncOnlineState() {
+            if (!conn || !conn.open) return;
+            conn.send({
+                boardSize: BOARD_SIZE,
+                stones,
+                nextStoneId,
+                turn,
+                captures,
+                consecutivePasses,
+                gameOver,
+                gameResultData,
+                gamePhase,
+                prevStones,
+                lastMove,
+                deadStones: [...deadStones],
+                history
+            });
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (gameMode === 'online') cleanupPeer();
+        });
+        // 念のためページを離れる直前にも保存 (保存漏れを拾う)
+        window.addEventListener('pagehide', saveState);
+
+        // ==========================================
+        // 11. 設定モーダル & UI / テーマ制御
+        // ==========================================
+        btnOpenSettings.addEventListener('click', () => {
+            soundManager.playClick();
+            settingsModal.classList.remove('hidden');
+        });
+
+        const rulesModal = document.getElementById('rulesModal');
+        const closeRules = () => { soundManager.playClick(); rulesModal.classList.add('hidden'); };
+        document.getElementById('btnOpenRules').addEventListener('click', () => {
+            soundManager.playClick();
+            rulesModal.classList.remove('hidden');
+        });
+        document.getElementById('btnCloseRules').addEventListener('click', closeRules);
+        document.getElementById('btnCloseRules2').addEventListener('click', closeRules);
+        rulesModal.addEventListener('click', (e) => { if (e.target === rulesModal) closeRules(); });
+
+        btnCloseSettings.addEventListener('click', () => {
+            soundManager.playClick();
+            settingsModal.classList.add('hidden');
+        });
+
+        // 盤サイズ選択ボタン
+        document.querySelectorAll('.btn-size').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                soundManager.playClick();
+                document.querySelectorAll('.btn-size').forEach(b => b.classList.remove('bg-neutral-900', 'text-white'));
+                e.target.classList.add('bg-neutral-900', 'text-white');
+                pendingBoardSize = parseInt(e.target.dataset.size);
+                saveState();
+            });
+        });
+
+        // モード選択ボタン
+        document.querySelectorAll('.btn-mode').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                soundManager.playClick();
+                document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('bg-neutral-900', 'text-white'));
+                e.target.classList.add('bg-neutral-900', 'text-white');
+                const newMode = e.target.dataset.mode;
+
+                if (gameMode === 'online' && newMode !== 'online') {
+                    cleanupPeer();
+                    onlineRoomId = null;
+                    myOnlineRole = null;
+                    onlineRoomStatus.textContent = '';
+                }
+                gameMode = newMode;
+
+                aiOptions.classList.toggle('hidden', gameMode !== 'ai');
+                onlineOptions.classList.toggle('hidden', gameMode !== 'online');
+                saveState();
+            });
+        });
+
+        btnAiPlayerBlack.addEventListener('click', () => {
+            soundManager.playClick();
+            aiPlayer = 2; // あなた=黒, AI=白
+            btnAiPlayerBlack.className = "py-1.5 rounded border text-xs font-bold bg-neutral-900 text-white";
+            btnAiPlayerWhite.className = "py-1.5 rounded border text-xs font-bold bg-white text-neutral-800 border-neutral-300";
+            saveState();
+        });
+
+        btnAiPlayerWhite.addEventListener('click', () => {
+            soundManager.playClick();
+            aiPlayer = 1; // あなた=白, AI=黒
+            btnAiPlayerWhite.className = "py-1.5 rounded border text-xs font-bold bg-neutral-900 text-white";
+            btnAiPlayerBlack.className = "py-1.5 rounded border text-xs font-bold bg-white text-neutral-800 border-neutral-300";
+            saveState();
+        });
+
+        btnToggleSound.addEventListener('click', () => {
+            soundManager.enabled = !soundManager.enabled;
+            setToggleButton(btnToggleSound, soundManager.enabled);
+            soundManager.playClick();
+            saveState();
+        });
+
+        btnToggleLinks.addEventListener('click', () => {
+            soundManager.playClick();
+            showLinks = !showLinks;
+            setToggleButton(btnToggleLinks, showLinks);
+            render();
+            saveState();
+        });
+
+        btnToggleTerritory.addEventListener('click', () => {
+            soundManager.playClick();
+            showTerritory = !showTerritory;
+            setToggleButton(btnToggleTerritory, showTerritory);
+            render();
+            saveState();
+        });
+
+        btnToggleSnap.addEventListener('click', () => {
+            soundManager.playClick();
+            snapToGrid = !snapToGrid;
+            setToggleButton(btnToggleSnap, snapToGrid);
+            render();
+            saveState();
+        });
+
+        // テーマボタン生成
+        function buildThemeList() {
+            themeList.innerHTML = '';
+            Object.values(THEMES).forEach(th => {
+                const b = document.createElement('button');
+                b.className = `w-full p-2.5 rounded-lg border flex items-center justify-between text-xs font-bold transition-all ${th.bg} ${th.text} ${th.border}`;
+                b.innerHTML = `
+                    <span>${th.name}</span>
+                    <div class="flex gap-1">
+                        <div class="w-3 h-3 rounded-full border border-black/20" style="background:${th.p1Fill}"></div>
+                        <div class="w-3 h-3 rounded-full border border-black/20" style="background:${th.p2Fill}"></div>
+                    </div>
+                `;
+                b.addEventListener('click', () => {
+                    soundManager.playClick();
+                    applyTheme(th);
+                });
+                themeList.appendChild(b);
+            });
+        }
+
+        function applyTheme(th) {
+            currentTheme = th;
+            appBody.className = `min-h-screen flex flex-col items-center justify-between p-3 sm:p-6 select-none transition-colors duration-300 ${th.bg} ${th.text}`;
+            statusCard.className = `w-full p-3.5 sm:p-4 rounded-xl flex flex-col gap-3 transition-colors text-sm sm:text-base border ${th.cardBg} ${th.border}`;
+            const opBtn = `py-2.5 px-4 text-xs sm:text-sm font-bold border rounded-xl hover:opacity-80 active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${th.cardBg} ${th.border}`;
+            btnPass.className = `flex-1 ${opBtn}`;
+            btnUndo.className = `flex-1 ${opBtn}`;
+            btnConfirm.className = `${isTouchUI ? '' : 'hidden'} w-full py-3 px-4 text-sm font-bold rounded-xl active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${th.btnBg}`;
+            render();
+            saveState();
+        }
+
+        btnStartNewGame.addEventListener('click', () => {
+            soundManager.playClick();
+            settingsModal.classList.add('hidden');
+            resetGame();
+        });
+
+        // ==========================================
+        // 12. 状態更新 & ゲーム初期化
+        // ==========================================
+        function updateUI() {
+            turnIndicator.textContent = turn === 1 ? '黒 (1P)' : '白 (2P)';
+            blackCapturesEl.textContent = captures[1];
+            whiteCapturesEl.textContent = captures[2];
+            komiDisplay.textContent = komi;
+
+            if (gameMode === 'local') gameModeBadge.textContent = 'ローカル対戦';
+            else if (gameMode === 'ai') gameModeBadge.textContent = `AI対戦 (${aiPlayer === 2 ? 'あなた:黒' : 'あなた:白'})`;
+            else if (gameMode === 'online') gameModeBadge.textContent = `オンライン (${myOnlineRole === 1 ? '黒' : '白'})`;
+
+            btnUndo.disabled = !canUndo();
+            render();
+        }
+
+        function resetGame() {
+            BOARD_SIZE = pendingBoardSize; // 選択済みの盤サイズをここで適用
+            stones = [];
+            nextStoneId = 1;
+            turn = 1;
+            captures = { 1: 0, 2: 0 };
+            consecutivePasses = 0;
+            gameOver = false;
+            gameResultData = null;
+            gamePhase = 'playing';
+            deadStones.clear();
+            territoryView = null;
+            previewRaw = null;
+            lastMove = null;
+            prevStones = null;
+            history = [];
+            refreshAnalysis();
+
+            if (bannerDeadStones) bannerDeadStones.classList.add('hidden');
+            resultModal.classList.add('hidden');
+            bannerResult.classList.add('hidden');
+
+            updateUI();
+
+            saveState();
+
+            if (gameMode === 'ai' && turn === aiPlayer) {
+                triggerAiMove();
+            }
+        }
+
+        // アプリ起動時初期化
+        window.onload = () => {
+            buildThemeList();
+            refreshAnalysis();
+
+            // タッチ端末なら確定ボタンを最初から表示
+            const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+            setTouchUI(!!coarse || ('ontouchstart' in window));
+
+            // 保存済みの対局状態があれば復元 (なければ初期状態のまま)
+            const restored = loadState();
+            applyTheme(currentTheme);
+            syncSettingsUI();
+
+            if (restored && gamePhase === 'dead_stone_selection') {
+                bannerDeadStones.classList.remove('hidden');
+            }
+            if (restored && gameOver) {
+                bannerResult.classList.remove('hidden');
+            }
+
+            resizeCanvas();
+            updateUI();
+
+            // AIの手番の途中でリロードされた場合は思考を再開
+            if (restored && !gameOver && gamePhase === 'playing' && gameMode === 'ai' && turn === aiPlayer) {
+                triggerAiMove();
+            }
+        };
+    </script>
+</body>
+</html>
